@@ -1,9 +1,140 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
-  <head>
-    <title>Matt Hughes</title>
-  </head>
-  <body>
-    <p>This is a placeholder.</p>
-  </body>
+<head>
+<link rel="canonical" href="https://www.matthughes.info/" />
+<title>Endlessly curious.</title>
+<script>
+// https "redirect" from http://stackoverflow.com/a/4723302/796554
+// this kinda sucks because the browser won't cache it like a 301/302
+// also if you're MTIM'ing me already you can just remove this script...
+// but it works with gitlab pages!
+
+// disabling for now.
+//if(location.protocol != 'https:') {
+//  location.href = 'https:' + window.location.href.substring(window.location.protocol.length);
+//}
+</script>
+<script src="./index_files/three.min.js"></script>
+<style>
+    html, body {
+        height: 100%;
+    }
+    body {
+        background: black;
+        margin: 0;
+        padding: 0;
+    }
+    #overlay {
+        position: absolute;
+        color: rgb(77, 255, 102);
+        font-size: 3vh;
+        font-family: courier;
+        top: 30%;
+        width: 100%;
+        text-align: center;
+        text-shadow: 0px 0px 10px rgb(77, 255, 102);
+    }
+    a, a:visited {
+        color: rgb(77, 255, 102);
+    }
+    a:hover {
+        color: rgb(112, 255, 131);
+    }
+    pre {
+        display: inline;
+    }
+    .iconHover {
+        cursor: pointer;
+    }
+</style>
+<script id="texturedVert" type="x-shader/x-vertex">
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    uniform float time;
+
+    void main() {
+        vUv = uv - vec2(time/32.0, 0.0);
+        vNormal = vec3(modelViewMatrix * vec4(normal, 1.0));
+
+        gl_Position =   projectionMatrix *
+        modelViewMatrix *
+        vec4(position,1.0);
+    }
+</script>
+<script id="texturedFrag" type="x-shader/x-fragment">
+    uniform sampler2D texture1;
+    uniform float cutoff;
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    float trace = 0.008;
+    float land_trace = 0.1;
+
+    void main() {
+        float norm_magnitude = length(vec2(vNormal));
+        float edge_color =pow(norm_magnitude, 30.0) * 8.0;
+        vec4 sample = texture2D(texture1, vUv);
+
+        if (sample.r > cutoff + trace) {
+            sample.rgb = vec3(0.0);
+        } else if (sample.r > cutoff - trace) {
+            float val = 1.0 - (sample.r - (cutoff - trace)) / (1.0 - (cutoff - trace))*50.0;
+            sample.rgb = max(0.0, val) * vec3(0.3, 1.0, 0.4);
+        } else {
+            sample.rgb = vec3(0.0);
+        }
+        sample.rgb += edge_color * vec3(0.3, 1.0, 0.4);
+        gl_FragColor = sample;
+    }
+</script>
+<script id="iconVert" type="x-shader/x-vertex">
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    uniform float time;
+
+    void main() {
+        vec2 offset = vec2(0.5, 0.5);
+        vUv = (uv-offset)*(1.0+0.1*sin(time*5.0))+offset;
+        vNormal = vec3(modelViewMatrix * vec4(normal, 1.0));
+
+        gl_Position =   projectionMatrix *
+        modelViewMatrix *
+        vec4(position,1.0);
+    }
+</script>
+<script id="iconFrag" type="x-shader/x-fragment">
+    uniform sampler2D texture1;
+    uniform float cutoff;
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    float trace = 0.008;
+    float land_trace = 0.1;
+
+    void main() {
+        vec4 sample = texture2D(texture1, vUv);
+        float value = sample.r;
+        vec3 color = vec3(0.3, 1.0, 0.4);
+        gl_FragColor = vec4(color, value);
+    }
+</script>
+</head>
+<body>
+<div id="container"></div>
+<div id="overlay">
+    <p>Matthew Hughes</p><p>
+    </p><p></p><pre><a href="https://github.com/hughes/">hughes</a></pre> on github<p></p>
+    <p></p><pre>ghost[]</pre> on freenode<p></p>
+    <p>hughesm02 at gmail dot com</p>
+    <p>matthew.hughes at spacex dot com</p>
+</div>
+
+<script src="./index_files/main.js"></script>
+<!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-36226098-2"></script>
+<script>
+   window.dataLayer = window.dataLayer || [];
+   function gtag(){dataLayer.push(arguments);}
+   gtag('js', new Date());
+   gtag('config', 'UA-36226098-2');
+</script>
+</body>
 </html>
