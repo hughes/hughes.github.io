@@ -1,0 +1,784 @@
+<pre>
+Note: this is a backup of the an original article which has been mostly lost.
+	<article class="post">
+		<div class="inner">
+
+			<section class="post-content">
+<p>This article will describe my approach for creating the environment-based lighting and reflections shown in the tweet above. It consists of several parts:</p>
+<ol>
+<li>Acquire a video stream from the webcam</li>
+<li>Create a fragment shader that converts view angle to a sample from the video</li>
+<li>Create a cubemap that renders the shader for all view angles to produce the metalic/reflective texture</li>
+<li>Create a set of mipmaps based on the cubemap to produce the diffuse/rough texture</li>
+</ol>
+<p>I can't take credit for coming up with this - I was inspired by other similar demos I've seen, such as <a href="https://www.youtube.com/watch?v=0LHvXJTLie0">this video by Bob Burrough</a>. I just want to try to lay out the approach I used (which is likely full of errors or otherwise suboptimal) and explain some of the challenges I encountered.</p>
+<p>TL;DR: <a href="https://www.matthughes.info/demos/reflection/">Demo link</a> (Looking Glass optional)</p>
+<h1 id="streamingvideofromthewebcam">Streaming video from the webcam</h1>
+<p>For this demo, I used a <a href="https://www.amazon.com/gp/product/B01N03L68J/">180 degree fisheye lens webcam</a> (<em>not</em> a referral link). I found it to be a bit less than 180 degrees at the edges, but was pretty close to 180 degrees from corner to corner. The wider the angle the better for this demo, but it's okay if you have a more narrow angle too.</p>
+<p>Using a set of helping hands from an electronics kit, I positioned the webcam above the Looking Glass.</p>
+<p><img src="https://www.matthughes.info/blog/content/images/2019/02/helping-hands-lkg.jpg" alt="helping-hands-lkg"></p>
+<p>It's easy to access the webcam with HTML5 features. Add a hidden <code>&lt;video&gt;</code> tag somewhere in your html body.</p>
+<pre><code class="language-html">&lt;video id="video" autoplay style="display:none"&gt;&lt;/video&gt;
+</code></pre>
+<p>I started by initializing the webcam and attaching the stream to the video element. I used a relatively low resolution (640x480) to prioritize performance.</p>
+<p>To get the video stream onto a texture in three.js, I made a <code>THREE.VideoTexture</code>  referencing the video element.</p>
+<pre><code class="language-js">/**
+ * Initializes a webcam video stream for an HTML video element
+ * @param {HTMLVideoElement} videoElement 
+ */
+async function initWebcam(videoElement) {
+  // create a video stream
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {width: 640, height: 480},
+    });
+  } catch(error) {
+    return console.error('Unable to access the webcam.', error);
+  }
+
+  // apply the stream to the video element
+  videoElement.srcObject = stream;
+  videoElement.play();
+}
+
+
+/**
+ * Initializes the demo scene.
+ */
+function initScene() {
+  const videoElement = document.getElementById('video');
+  
+  // initialize the webcam
+  initWebcam(videoElement);
+
+  // create a video texture
+  videoTexture = new THREE.VideoTexture(videoElement);
+}
+
+initScene();
+</code></pre>
+<p>Let's build a quick demo to check if the webcam is working.</p>
+<div class="codeDemo" style="height: 300px" data-demo="basicWebcamDemo">Click to run demo</div>
+<details>
+    <summary>Demo source</summary>
+    <pre><code class="language-js hljs javascript">function basicWebcamDemo(container) {
+  const videoElement = document.getElementById('video');
+  
+  // initialize the webcam
+  const videoWidth = 640, videoHeight = 480;
+  initWebcam(videoElement, videoWidth, videoHeight);
+
+  // create a renderer, scene and camera
+  const renderer = initRenderer(container);
+  const {width, height} = renderer.getSize();
+  const scene = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera(
+    -width/2, width/2, height/2, -height/2,
+    1, 10000,
+  );
+  camera.position.z = 1000;
+  scene.add(camera);
+
+  // create a video texture
+  const videoTexture = new THREE.VideoTexture(videoElement);
+
+  // populate the scene with a textured plane
+  const aspectRatio = videoHeight / videoWidth;
+  const plane = new THREE.PlaneGeometry(width, width*aspectRatio);
+  const videoMaterial = new THREE.MeshBasicMaterial({
+    map: videoTexture
+  });
+  const mesh = new THREE.Mesh(plane, videoMaterial);
+  mesh.scale.x = -1;
+  scene.add(mesh);
+  
+  animate(renderer, scene, camera);
+}</code></pre>
+</details>
+<p>Looks good so far! However, there's a big problem present in most setups. Webcams will by default try to adjust their gain and white balance depending on the content of the scene, which means that as things move around in front of the camera, the overall view will not be captured with consistent exposure settings.</p>
+<p>You can probably live without fixing that for the sake of this article, but for the demo to work properly I needed to be able to have control of these exposure settings. There is no option for this in <code>getUserMedia</code> and no way to modify the resulting video stream in the browser, so I had to look for another way to control this.</p>
+<p>I found that by adding a Video Capture Device in <a href="https://obsproject.com/">OBS</a>, I could use the "Configure Video" button to access a panel that would let me disable automatic white balance and automatic exposure. I adjusted them manually until I reached a combination of settings that worked for my environment. These settings persist after closing the settings panel.</p>
+<p><img src="https://www.matthughes.info/blog/content/images/2019/02/obs-settings.png" alt="obs-settings"></p>
+<h1 id="createtheshaders">Create the shaders</h1>
+<p>In order to convert view angle to a texture coordinate in the video, I created a fragment shader. This shader is not very physically accurate, it just assumes that the edges of the texture will map roughly to the edges of a hemispheric view looking out from the camera. Of course, a vertex shader is also necessary, but this one just sets the standard vertex positions and normals.</p>
+<p>I stored my shaders on script elements somewhere in the DOM and read their contents into a <code>THREE.ShaderMaterial</code>.</p>
+<pre><code>&lt;script type="x-shader/x-vertex" id="vertexshader"&gt;
+  #ifdef GL_ES
+  precision highp float;
+  #endif
+
+  varying vec2 vUv;
+  varying vec3 norm;
+    
+  void main()
+  {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+    norm = normal;
+  }  
+&lt;/script&gt;
+&lt;script type="x-shader/x-fragment" id="fragmentshader"&gt;
+  #ifdef GL_ES
+  precision highp float;
+  #endif
+
+  varying vec2 vUv;
+  varying vec3 norm;
+  uniform sampler2D texture;
+    
+  void main()
+  {
+    // use the xy normal to look up the texture position
+    // and convert the [-1, 1] range to [0, 1]
+    vec2 lookup = (norm.xy + 1.0) / 2.0;
+    
+    // generate an attenuation factor to darken the back
+    float attenuation = min(1.0, norm.z + 1.0);
+    
+    // flip the x component to mirror the image
+    lookup.x = 1.0 - lookup.x;
+    
+    // look up and output the attenuated texture color
+    vec3 color = texture2D(texture, lookup).rgb;
+    gl_FragColor = vec4(color * attenuation, 1.0);
+  }
+&lt;/script&gt;
+</code></pre>
+<p>These shaders were then applied to a <code>THREE.ShaderMaterial</code>.</p>
+<pre><code class="language-javascript">const shaderMaterial = new THREE.ShaderMaterial({
+  vertexShader:   document.getElementById('vertexshader').innerText,
+  fragmentShader: document.getElementById('fragmentshader').innerText,
+  uniforms: {
+    texture: new THREE.Uniform(videoTexture),
+  },
+});
+</code></pre>
+<p>Let's build another demo to check if the shader is working.</p>
+<div class="codeDemo" style="height: 300px" data-demo="shaderDemo">Click to run demo</div>
+<details>
+    <summary>Demo source</summary>
+    <pre><code class="language-js hljs javascript">function shaderDemo(container) {
+  const videoElement = document.getElementById('video');
+  
+  // initialize the webcam
+  const videoWidth = 640, videoHeight = 480;
+  initWebcam(videoElement, videoWidth, videoHeight);
+
+  // create a renderer, scene and camera
+  const renderer = initRenderer(container);
+  const {width, height} = renderer.getSize();
+  const scene = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera(
+    -width/2, width/2, height/2, -height/2,
+    1, 10000,
+  );
+  camera.position.z = 1000;
+  scene.add(camera);
+
+  // create a video texture
+  const videoTexture = new THREE.VideoTexture(videoElement);
+  
+  // create the shader material
+  const shaderMaterial = new THREE.ShaderMaterial({
+    vertexShader:   document.getElementById('vertexshader').innerText,
+    fragmentShader: document.getElementById('fragmentshader').innerText,
+    uniforms: {
+      texture: new THREE.Uniform(videoTexture),
+    },
+  });
+
+  // populate the scene with geometry &amp; a shader
+  const geometry = new THREE.SphereGeometry(100, 10, 10);
+  const mesh = new THREE.Mesh(geometry, shaderMaterial);
+  scene.add(mesh);
+  
+  function update(t, dt) {
+    // wiggle the mesh a bit
+    mesh.rotation.y = 0.5*Math.sin(t) + 0.25 * t;
+    mesh.rotation.x = 0.5*Math.cos(t * 0.8);
+  }
+  
+  animate(renderer, scene, camera, update);
+}</code></pre>
+</details>
+<p>You'll notice there's some trickery happening here. To account for the limited field of view of the camera, I mirrored the view on the rear side of the sphere. To try to limit how much this distorts reality, I applied an attenuation factor towards the back of the sphere.</p>
+<p><strong>If you have a 360 degree camera</strong> (likely made from a pair of front + back 180 degree cameras), you can use two textures &amp; use a lookup from the reverse camera when <code>norm.z &lt; 0</code>. You'd omit the attenuation factor in this case.</p>
+<h1 id="createacubemapforreflections">Create a cubemap for reflections</h1>
+<p>I created a cubemap by placing some cameras inside the sphere. They look out on the world and see the view as rendered by the shader, and render their views to a set of textures that we can use for reflections. There is a helper class called <code>THREE.CubeCamera</code> that can do this.</p>
+<p>This part required <em>two</em> scenes. In one scene, I placed the sphere and CubeCamera. This scene is rendered independently. The second scene used the texture rendered by the first scene as an environment map.</p>
+<p>The cubemap resolution does not need to be very high - 128x128 for each face seemed like plenty. Once the cubemap was rendered, I applied it to a <code>THREE.MeshStandardMaterial</code> with a full metallic value and no roughness.</p>
+<p>Creating a scene for the cubemap is pretty straightforward.</p>
+<pre><code class="language-javascript">// create a scene for the cubemap
+const cubeMapScene = new THREE.Scene();
+const cubeCamera = new THREE.CubeCamera(1, 1000, 128);
+
+// populate the cubemap scene with a sphere &amp; shader
+const sphere = new THREE.SphereGeometry(100, 15, 15);
+const sphereMesh = new THREE.Mesh(sphere, shaderMaterial);
+cubeMapScene.add(sphereMesh);
+</code></pre>
+<p>I then used the cube camera's render target texture as the environment map in a <code>THREE.MeshStandardMaterial</code>.</p>
+<pre><code class="language-javascript"> const material = new THREE.MeshStandardMaterial( {
+   color: 0xffffff,
+   metalness: 1.0,
+   roughness: 0.0,
+   envMap: cubeCamera.renderTarget.texture,
+ });
+</code></pre>
+<p>One thing to remember is that on every frame, the cube camera must be updated.</p>
+<pre><code class="language-javascript">// on every frame...
+cubeCamera.update(renderer, cubeMapScene);
+</code></pre>
+<div class="codeDemo" style="height: 300px" data-demo="cubeMapDemo">Click to run demo</div>
+<details>
+    <summary>Demo source</summary>
+    <pre><code class="language-js hljs javascript">function cubeMapDemo(container) {
+  
+  const videoElement = document.getElementById('video');
+  
+  // initialize the webcam
+  const videoWidth = 640, videoHeight = 480;
+  initWebcam(videoElement, videoWidth, videoHeight);
+  
+  // create a video texture
+  const videoTexture = new THREE.VideoTexture(videoElement);
+  
+  // create the shader material
+  const shaderMaterial = new THREE.ShaderMaterial({
+    vertexShader: document.getElementById('vertexshader').innerText,
+    fragmentShader: document.getElementById('fragmentshader').innerText,
+    uniforms: {
+      texture: new THREE.Uniform(videoTexture),
+    },
+    side: THREE.DoubleSide,
+  });
+
+  // create a scene for the cubemap
+  const cubeMapScene = new THREE.Scene();
+  const cubeCamera = new THREE.CubeCamera(1, 1000, 128);
+
+  // populate the cubemap scene with a sphere &amp; shader
+  const sphere = new THREE.SphereGeometry(100, 15, 15);
+  const sphereMesh = new THREE.Mesh(sphere, shaderMaterial);
+  cubeMapScene.add(sphereMesh);
+
+  // create a renderer, scene and camera
+  const renderer = initRenderer(container);
+  const {width, height} = renderer.getSize();
+  const scene = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera(
+    -width/2, width/2, height/2, -height/2,
+    1, 10000,
+  );
+  camera.position.z = 1000;
+  scene.add(camera);
+
+  // populate the scene with a textured plane
+  const aspectRatio = videoHeight / videoWidth;
+  const geometry = new THREE.TorusKnotBufferGeometry(80, 30, 100, 16);
+  const material = new THREE.MeshStandardMaterial( {
+    color: 0xffffff,
+    metalness: 1.0,
+    roughness: 0.0,
+    envMap: cubeCamera.renderTarget.texture,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  scene.add(mesh);
+
+  function update(t, dt) {
+    cubeCamera.update(renderer, cubeMapScene);
+    
+    // wiggle the mesh a bit
+    mesh.rotation.y = Math.sin(t);
+    mesh.rotation.x = Math.cos(t * 0.8);
+  }
+  
+  animate(renderer, scene, camera, update);
+}</code></pre>
+</details>
+<h1 id="createadiffusetexture">Create a diffuse texture</h1>
+<p>The cubemap is fine for reflective surfaces, but I wanted to illuminate diffuse surfaces as well. To do that I used <code>THREE.PMREMGenerator</code>. PMREM stands for Prefiltered Mipmap Radiance Environment Map, and is mainly a downsampled version of the environment map that roughly preserves the total radiance of the image. For example, here is one face of the original cubemap and its four downsampled PMREM versions.</p>
+<p><img src="https://www.matthughes.info/blog/content/images/2019/02/radiance.png" alt="radiance"></p>
+<p>Once the PMREMGenerator has rendered all of the filtering levels of each cube face, it will have rendered dozens of individual render targest. It's not efficient or necessary to use so many individual textures, which is where <code>THREE.PMREMCubeUVPacker</code> comes in. It's used to generate a single texture that can store all the resulting images.</p>
+<p><img src="https://www.matthughes.info/blog/content/images/2019/02/uv-packed-1.png" alt="uv-packed-1"></p>
+<p>Here's how I created these helpers.</p>
+<pre><code class="language-javascript">// when initializing the cube map scene...
+const cubeCamera = new THREE.CubeCamera(1, 1000, 128);
+const pmremGenerator = new THREE.PMREMGenerator(
+  cubeCamera.renderTarget.texture
+);
+const pmremCubeUVPacker = new THREE.PMREMCubeUVPacker(
+  pmremGenerator.cubeLods
+);
+</code></pre>
+<p>In the non-cubemap scene, the material must also take in the PMREMCubeUVPacker's result.</p>
+<pre><code class="language-javascript">const material = new THREE.MeshStandardMaterial({
+  color: 0xffffff,
+  metalness: 0.0,
+  roughness: 1.0,
+  // this is the important change
+  envMap: pmremCubeUVPacker.CubeUVRenderTarget.texture,
+});
+</code></pre>
+<p>Since we need this to react in real time, the PMREMGenerator and PMREMCubeUVPacker must be updated on each frame.</p>
+<pre><code class="language-javascript">// on every frame...
+cubeCamera.update(renderer, cubeMapScene);
+pmremGenerator.update(renderer);
+pmremCubeUVPacker.update(renderer);
+</code></pre>
+<p>The result is that now we can control the relative roughness and "metalness" of the material using information from the real world environment. Try adjusting the relative values of these parameters in the demo below.</p>
+<div class="codeDemo" style="height: 300px" data-demo="mipMapDemo">Click to run demo</div>
+<details>
+    <summary>Demo source</summary>
+    <pre><code class="language-js hljs javascript">function mipMapDemo(container) {
+  
+  const videoElement = document.getElementById('video');
+  
+  // initialize the webcam
+  const videoWidth = 640, videoHeight = 480;
+  initWebcam(videoElement, videoWidth, videoHeight);
+
+  // create a scene for the cubemap
+  const cubeMapScene = new THREE.Scene();
+  const cubeCamera = new THREE.CubeCamera(1, 1000, 128);
+  const pmremGenerator = new THREE.PMREMGenerator(
+    cubeCamera.renderTarget.texture
+  );
+  const pmremCubeUVPacker = new THREE.PMREMCubeUVPacker(
+    pmremGenerator.cubeLods
+  );
+  const cubeRenderTarget = pmremCubeUVPacker.CubeUVRenderTarget;
+  
+  // create a video texture
+  const videoTexture = new THREE.VideoTexture(videoElement);
+  
+  // create the shader material
+  const shaderMaterial = new THREE.ShaderMaterial({
+    vertexShader: document.getElementById('vertexshader').innerText,
+    fragmentShader: document.getElementById('fragmentshader').innerText,
+    uniforms: {
+      texture: new THREE.Uniform(videoTexture),
+    },
+    side: THREE.DoubleSide,
+  });
+
+  // populate the cubemap scene with a sphere &amp; shader
+  const sphere = new THREE.SphereGeometry(100, 15, 15);
+  const sphereMesh = new THREE.Mesh(sphere, shaderMaterial);
+  cubeMapScene.add(sphereMesh);
+
+  // create a renderer, scene and camera
+  const renderer = initRenderer(container);
+  const {width, height} = renderer.getSize();
+  const scene = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera(
+    -width/2, width/2, height/2, -height/2,
+    1, 10000,
+  );
+  camera.position.z = 1000;
+  scene.add(camera);
+
+  // populate the scene with a textured plane
+  const aspectRatio = videoHeight / videoWidth;
+  const geometry = new THREE.TorusKnotBufferGeometry( 80, 30, 100, 16 );
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    metalness: 0.0,
+    roughness: 1.0,
+    envMap: cubeRenderTarget.texture,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  scene.add(mesh);
+  
+  const gui = new dat.GUI({autoPlace: false});
+  container.append(gui.domElement);
+  const params = {
+    roughness: material.roughness, 
+    metalness: material.metalness,
+  };
+  gui.add( params, 'roughness', 0, 1, 0.01 );
+  gui.add( params, 'metalness', 0, 1, 0.01 );
+  gui.open();
+
+  function update(t, dt) {
+    cubeCamera.update(renderer, cubeMapScene);
+    pmremGenerator.update(renderer);
+    pmremCubeUVPacker.update(renderer);
+    
+    // update the material in response to the gui
+    material.roughness = params.roughness;
+    material.metalness = params.metalness;
+    
+    // wiggle the mesh a bit
+    mesh.rotation.y = 0.5*Math.sin(t);
+    mesh.rotation.x = 0.5*Math.cos(t * 0.8);
+  }
+  
+  animate(renderer, scene, camera, update);
+}</code></pre>
+</details>
+<p>Besides putting it on the Looking Glass, that's about it! If you have a Looking Glass display, definitely try the full <a href="https://www.matthughes.info/demos/reflection/">demo</a>. Thanks for reading.</p>
+<p><img src="https://www.matthughes.info/blog/content/images/2019/02/IMG_20190226_214736-2.jpg" alt="result"><br>
+<em>Is any graphics demo complete without a teapot somewhere in the scene?</em></p>
+<script type="x-shader/x-vertex" id="vertexshader">
+  #ifdef GL_ES
+  precision highp float;
+  #endif
+
+  varying vec2 vUv;
+  varying vec3 norm;
+    
+  void main()
+  {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+    norm = normal;
+  }  
+</script>
+<script type="x-shader/x-fragment" id="fragmentshader">
+  #ifdef GL_ES
+  precision highp float;
+  #endif
+
+  varying vec2 vUv;
+  varying vec3 norm;
+  uniform sampler2D texture;
+    
+  void main()
+  {
+    // use the xy normal to look up the texture position
+    // and convert the [-1, 1] range to [0, 1]
+    vec2 lookup = (norm.xy + 1.0) / 2.0;
+    
+    // generate an attenuation factor to darken edges
+    float attenuation = min(1.0, norm.z + 1.0);
+    
+    // flip the x component
+    lookup.x = 1.0 - lookup.x;
+    vec3 color = texture2D(texture, lookup).rgb;
+    gl_FragColor = vec4(color * attenuation, 1.0);
+  }
+</script>
+<script type="text/javascript">
+/**
+ * Initializes a webcam video stream for an HTML video element
+ * @param {HTMLVideoElement} videoElement 
+ * @param {number} width
+ * @param {number} height
+ */
+async function initWebcam(videoElement, width, height) {
+  // create a video stream
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {width, height, facingMode: 'user'},
+    });
+  } catch(error) {
+    return console.error('Unable to access the webcam.', error);
+  }
+
+  // apply the stream to the video element
+  videoElement.srcObject = stream;
+  videoElement.play();
+}
+
+function initRenderer(container) {
+  renderer = new THREE.WebGLRenderer( { antialias: true } );
+  renderer.toneMapping = THREE.LinearToneMapping;
+  // renderer.setClearColor(0x112233, 1);
+  renderer.setSize(container.offsetWidth, container.offsetHeight );
+  container.appendChild(renderer.domElement);
+  return renderer;
+}
+
+
+function runDemo(container, demo) {
+  container.onclick = null;
+  demo(container);
+}
+
+const demos = {basicWebcamDemo, shaderDemo, cubeMapDemo, mipMapDemo};
+
+function basicWebcamDemo(container) {
+  const videoElement = document.getElementById('video');
+  
+  // initialize the webcam
+  const videoWidth = 640, videoHeight = 480;
+  initWebcam(videoElement, videoWidth, videoHeight);
+
+  // create a renderer, scene and camera
+  const renderer = initRenderer(container);
+  const {width, height} = renderer.getSize();
+  const scene = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera(
+    -width/2, width/2, height/2, -height/2,
+    1, 10000,
+  );
+  camera.position.z = 1000;
+  scene.add(camera);
+
+  // create a video texture
+  const videoTexture = new THREE.VideoTexture(videoElement);
+
+  // populate the scene with a textured plane
+  const aspectRatio = videoHeight / videoWidth;
+  const plane = new THREE.PlaneGeometry(width, width*aspectRatio);
+  const videoMaterial = new THREE.MeshBasicMaterial({
+    map: videoTexture
+  });
+  const mesh = new THREE.Mesh(plane, videoMaterial);
+  mesh.scale.x = -1;
+  scene.add(mesh);
+  
+  animate(renderer, scene, camera);
+}
+
+function shaderDemo(container) {
+  const videoElement = document.getElementById('video');
+  
+  // initialize the webcam
+  const videoWidth = 640, videoHeight = 480;
+  initWebcam(videoElement, videoWidth, videoHeight);
+
+  // create a renderer, scene and camera
+  const renderer = initRenderer(container);
+  const {width, height} = renderer.getSize();
+  const scene = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera(
+    -width/2, width/2, height/2, -height/2,
+    1, 10000,
+  );
+  camera.position.z = 1000;
+  scene.add(camera);
+
+  // create a video texture
+  const videoTexture = new THREE.VideoTexture(videoElement);
+  
+  // create the shader material
+  const shaderMaterial = new THREE.ShaderMaterial({
+    vertexShader:   document.getElementById('vertexshader').innerText,
+    fragmentShader: document.getElementById('fragmentshader').innerText,
+    uniforms: {
+      texture: new THREE.Uniform(videoTexture),
+    },
+  });
+
+  // populate the scene with geometry & a shader
+  const geometry = new THREE.SphereGeometry(100, 10, 10);
+  const mesh = new THREE.Mesh(geometry, shaderMaterial);
+  scene.add(mesh);
+  
+  function update(t, dt) {
+    // wiggle the mesh a bit
+    mesh.rotation.y = 0.5*Math.sin(t) + 0.25 * t;
+    mesh.rotation.x = 0.5*Math.cos(t * 0.8);
+  }
+  
+  animate(renderer, scene, camera, update);
+}
+
+function cubeMapDemo(container) {
+  
+  const videoElement = document.getElementById('video');
+  
+  // initialize the webcam
+  const videoWidth = 640, videoHeight = 480;
+  initWebcam(videoElement, videoWidth, videoHeight);
+  
+  // create a video texture
+  const videoTexture = new THREE.VideoTexture(videoElement);
+  
+  // create the shader material
+  const shaderMaterial = new THREE.ShaderMaterial({
+    vertexShader: document.getElementById('vertexshader').innerText,
+    fragmentShader: document.getElementById('fragmentshader').innerText,
+    uniforms: {
+      texture: new THREE.Uniform(videoTexture),
+    },
+    side: THREE.DoubleSide,
+  });
+
+  // create a scene for the cubemap
+  const cubeMapScene = new THREE.Scene();
+  const cubeCamera = new THREE.CubeCamera(1, 1000, 128);
+
+  // populate the cubemap scene with a sphere & shader
+  const sphere = new THREE.SphereGeometry(100, 15, 15);
+  const sphereMesh = new THREE.Mesh(sphere, shaderMaterial);
+  cubeMapScene.add(sphereMesh);
+
+  // create a renderer, scene and camera
+  const renderer = initRenderer(container);
+  const {width, height} = renderer.getSize();
+  const scene = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera(
+    -width/2, width/2, height/2, -height/2,
+    1, 10000,
+  );
+  camera.position.z = 1000;
+  scene.add(camera);
+
+  // populate the scene with a textured plane
+  const aspectRatio = videoHeight / videoWidth;
+  const geometry = new THREE.TorusKnotBufferGeometry(80, 30, 100, 16);
+  const material = new THREE.MeshStandardMaterial( {
+    color: 0xffffff,
+    metalness: 1.0,
+    roughness: 0.0,
+    envMap: cubeCamera.renderTarget.texture,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  scene.add(mesh);
+
+  function update(t, dt) {
+    cubeCamera.update(renderer, cubeMapScene);
+    
+    // wiggle the mesh a bit
+    mesh.rotation.y = Math.sin(t);
+    mesh.rotation.x = Math.cos(t * 0.8);
+  }
+  
+  animate(renderer, scene, camera, update);
+}
+  
+function mipMapDemo(container) {
+  
+  const videoElement = document.getElementById('video');
+  
+  // initialize the webcam
+  const videoWidth = 640, videoHeight = 480;
+  initWebcam(videoElement, videoWidth, videoHeight);
+
+  // create a scene for the cubemap
+  const cubeMapScene = new THREE.Scene();
+  const cubeCamera = new THREE.CubeCamera(1, 1000, 128);
+  const pmremGenerator = new THREE.PMREMGenerator(
+    cubeCamera.renderTarget.texture
+  );
+  const pmremCubeUVPacker = new THREE.PMREMCubeUVPacker(
+    pmremGenerator.cubeLods
+  );
+  const cubeRenderTarget = pmremCubeUVPacker.CubeUVRenderTarget;
+  
+  // create a video texture
+  const videoTexture = new THREE.VideoTexture(videoElement);
+  
+  // create the shader material
+  const shaderMaterial = new THREE.ShaderMaterial({
+    vertexShader: document.getElementById('vertexshader').innerText,
+    fragmentShader: document.getElementById('fragmentshader').innerText,
+    uniforms: {
+      texture: new THREE.Uniform(videoTexture),
+    },
+    side: THREE.DoubleSide,
+  });
+
+  // populate the cubemap scene with a sphere & shader
+  const sphere = new THREE.SphereGeometry(100, 15, 15);
+  const sphereMesh = new THREE.Mesh(sphere, shaderMaterial);
+  cubeMapScene.add(sphereMesh);
+
+  // create a renderer, scene and camera
+  const renderer = initRenderer(container);
+  const {width, height} = renderer.getSize();
+  const scene = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera(
+    -width/2, width/2, height/2, -height/2,
+    1, 10000,
+  );
+  camera.position.z = 1000;
+  scene.add(camera);
+
+  // populate the scene with a textured plane
+  const aspectRatio = videoHeight / videoWidth;
+  const geometry = new THREE.TorusKnotBufferGeometry( 80, 30, 100, 16 );
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    metalness: 0.0,
+    roughness: 1.0,
+    envMap: cubeRenderTarget.texture,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  scene.add(mesh);
+  
+  const gui = new dat.GUI({autoPlace: false});
+  container.append(gui.domElement);
+  const params = {
+    roughness: material.roughness, 
+    metalness: material.metalness,
+  };
+  gui.add( params, 'roughness', 0, 1, 0.01 );
+  gui.add( params, 'metalness', 0, 1, 0.01 );
+  gui.open();
+
+  function update(t, dt) {
+    cubeCamera.update(renderer, cubeMapScene);
+    pmremGenerator.update(renderer);
+    pmremCubeUVPacker.update(renderer);
+    
+    // update the material in response to the gui
+    material.roughness = params.roughness;
+    material.metalness = params.metalness;
+    
+    // wiggle the mesh a bit
+    mesh.rotation.y = 0.5*Math.sin(t);
+    mesh.rotation.x = 0.5*Math.cos(t * 0.8);
+  }
+  
+  animate(renderer, scene, camera, update);
+}
+
+function animate(renderer, scene, camera, update=() => {}, lastTime=new Date(), totalTime=0) {
+  const now = new Date();
+  const dt = (now - lastTime) / 1000;
+  const elapsed = totalTime + dt;
+  update(elapsed, dt);
+  requestAnimationFrame(() => animate(renderer, scene, camera, update, now, elapsed));
+  renderer.render(scene, camera);
+}
+
+
+
+function populateDemoSources() {
+  document.querySelectorAll('[data-demo]').forEach(container => {
+    const demo = demos[container.getAttribute('data-demo')];
+    container.onclick = () => {
+      container.innerHTML = '';
+      runDemo(container, demo);
+    }
+    container.innerHTML = 'Click to run demo';
+    
+    // check for a nearby code block to populate
+    const sourceDetails = container.nextElementSibling.querySelector('pre')
+    const source = document.createElement('code');
+    
+    if(source) {
+      source.innerHTML = demo.toString();
+      source.classList = 'language-js hljs javascript';
+      sourceDetails.appendChild(source);
+    }
+  });
+}
+populateDemoSources();
+</script>
+<p><video id="video" autoplay="" style="display:none"></video></p>
+<script src="https://www.matthughes.info/static/three.js" type="text/javascript"></script>
+<script src="https://www.matthughes.info/static/PMRemCubeUVPacker.js" type="text/javascript"></script>
+<script src="https://www.matthughes.info/static/PMRemGenerator.js" type="text/javascript"></script>
+<script src="https://www.matthughes.info/static/dat.gui.js" type="text/javascript"></script>
+<link rel="stylesheet" type="text/css" href="https://www.matthughes.info/static/dat.gui.css">
+<style>
+    .dg.main {
+        position: absolute;
+        top: 0px;
+        right: 0px;
+    }
+</style><!--kg-card-end: markdown-->
+			</section>
+
+
+
+
+		</div>
+	</article>
