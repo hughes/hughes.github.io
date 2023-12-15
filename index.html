@@ -83,7 +83,7 @@
     }
 
     vec3 render_land(float dist) {
-        float tmp = dot_dist(vec2(1000.0, 500.0)) - 1.0;
+        float tmp = dot_dist(vec2(250.0, 125.0)) - 1.0;
         return cool_green * tmp * tmp * gl_FragCoord.z;
         //return vec3(gl_FragCoord.z);
     }
