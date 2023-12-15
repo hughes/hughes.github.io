@@ -1,18 +1,15 @@
-(function(THREE) {
-'use strict';
-
 // set the scene size
-var WIDTH = window.innerWidth,
+const WIDTH = window.innerWidth,
     HEIGHT = window.innerHeight,
     VIEW_ANGLE = 45,
     ASPECT = WIDTH / HEIGHT,
-    NEAR = 0.1,
-    FAR = 10000,
+    NEAR = 200,
+    FAR = 500,
     RADIUS = 100;
 
-var renderer = new THREE.WebGLRenderer({ antialias: true });
-var camera = new THREE.PerspectiveCamera(VIEW_ANGLE, ASPECT, NEAR, FAR);
-var scene = new THREE.Scene();
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+const camera = new THREE.PerspectiveCamera(VIEW_ANGLE, ASPECT, NEAR, FAR);
+const scene = new THREE.Scene();
 
 scene.add(camera);
 camera.position.z = 300;
@@ -20,42 +17,45 @@ renderer.setSize(WIDTH, HEIGHT);
 
 window.addEventListener('resize', onWindowResize, false);
 
-function onWindowResize(){
+function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    uniforms.width = window.innerWidth;
+    uniforms.height = window.innerHeight;
 }
 
-var container = document.getElementById('container');
+const container = document.getElementById('container');
 container.appendChild(renderer.domElement);
 
-var uniforms = {
+const uniforms = {
     time: { type: 'f', value: 0.0 },
     texture1: { type: 't', value: THREE.ImageUtils.loadTexture('index_files/ocean_dist_resize.png') },
-    cutoff: { type: 'f', value: 0.456887065393 }
+    cutoff: { type: 'f', value: 0.456887065393 },
+    width: { type: 'f', value: WIDTH },
+    height: { type: 'f', value: HEIGHT },
 };
 
 uniforms.texture1.value.wrapS = uniforms.texture1.value.wrapT = THREE.RepeatWrapping;
 
-var textVShader = document.getElementById('texturedVert').innerText,
+const textVShader = document.getElementById('texturedVert').innerText,
     textFShader = document.getElementById('texturedFrag').innerText;
 
-var geometry = new THREE.SphereGeometry(RADIUS, 128, 64);
-var material = new THREE.ShaderMaterial({
+const geometry = new THREE.SphereGeometry(RADIUS, 128, 64);
+const material = new THREE.ShaderMaterial({
     uniforms: uniforms,
     vertexShader: textVShader,
     fragmentShader: textFShader
 });
 
-var earthMesh = new THREE.Mesh(geometry, material);
+const earthMesh = new THREE.Mesh(geometry, material);
 scene.add(earthMesh);
 
-var startTime = new Date();
-var dt = 0.0;
+const startTime = new Date();
 
 function tick() {
-    var now = new Date();
-    dt = (now - startTime) / 1000.0;
+    const now = new Date();
+    const dt = (now - startTime) / 1000.0;
     uniforms.time.value = dt;
 }
 
@@ -63,11 +63,10 @@ function render() {
     renderer.render(scene, camera);
 }
 
-function step(timestamp) {
+function step() {
     tick();
     render();
     requestAnimationFrame(step);
 }
 
 requestAnimationFrame(step);
-})(window.THREE);
