@@ -1,3 +1,17 @@
+// This is a basic asyncronous shader loader for THREE.js.
+function ShaderLoader(vertex_url, fragment_url, onLoad, onProgress, onError) {
+    var vertex_loader = new THREE.XHRLoader(THREE.DefaultLoadingManager);
+    vertex_loader.setResponseType('text');
+    vertex_loader.load(vertex_url, function (vertex_text) {
+        var fragment_loader = new THREE.XHRLoader(THREE.DefaultLoadingManager);
+        fragment_loader.setResponseType('text');
+        fragment_loader.load(fragment_url, function (fragment_text) {
+            onLoad(vertex_text, fragment_text);
+        });
+    }, onProgress, onError);
+}
+
+
 // set the scene size
 const WIDTH = window.innerWidth,
     HEIGHT = window.innerHeight,
@@ -38,35 +52,39 @@ const uniforms = {
 
 uniforms.texture1.value.wrapS = uniforms.texture1.value.wrapT = THREE.RepeatWrapping;
 
-const textVShader = document.getElementById('texturedVert').innerText,
-    textFShader = document.getElementById('texturedFrag').innerText;
 
-const geometry = new THREE.SphereGeometry(RADIUS, 128, 64);
-const material = new THREE.ShaderMaterial({
-    uniforms: uniforms,
-    vertexShader: textVShader,
-    fragmentShader: textFShader
-});
+function buildScene(textVShader, textFShader) {
 
-const earthMesh = new THREE.Mesh(geometry, material);
-scene.add(earthMesh);
 
-const startTime = new Date();
+    const geometry = new THREE.SphereGeometry(RADIUS, 128, 64);
+    const material = new THREE.ShaderMaterial({
+        uniforms: uniforms,
+        vertexShader: textVShader,
+        fragmentShader: textFShader
+    });
 
-function tick() {
-    const now = new Date();
-    const dt = (now - startTime) / 1000.0;
-    uniforms.time.value = dt;
-}
+    const earthMesh = new THREE.Mesh(geometry, material);
+    scene.add(earthMesh);
 
-function render() {
-    renderer.render(scene, camera);
-}
+    const startTime = new Date();
 
-function step() {
-    tick();
-    render();
+    function tick() {
+        const now = new Date();
+        const dt = (now - startTime) / 1000.0;
+        uniforms.time.value = dt;
+    }
+
+    function render() {
+        renderer.render(scene, camera);
+    }
+
+    function step() {
+        tick();
+        render();
+        requestAnimationFrame(step);
+    }
+
     requestAnimationFrame(step);
 }
 
-requestAnimationFrame(step);
+ShaderLoader('index_files/world.vert', 'index_files/world.frag', buildScene);
