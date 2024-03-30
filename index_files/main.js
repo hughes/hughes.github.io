@@ -1,11 +1,9 @@
 // This is a basic asyncronous shader loader for THREE.js.
+const loader = new THREE.FileLoader();
+
 function ShaderLoader(vertex_url, fragment_url, onLoad, onProgress, onError) {
-    var vertex_loader = new THREE.XHRLoader(THREE.DefaultLoadingManager);
-    vertex_loader.setResponseType('text');
-    vertex_loader.load(vertex_url, function (vertex_text) {
-        var fragment_loader = new THREE.XHRLoader(THREE.DefaultLoadingManager);
-        fragment_loader.setResponseType('text');
-        fragment_loader.load(fragment_url, function (fragment_text) {
+    loader.load(vertex_url, function (vertex_text) {
+        loader.load(fragment_url, function (fragment_text) {
             onLoad(vertex_text, fragment_text);
         });
     }, onProgress, onError);
@@ -42,20 +40,19 @@ function onWindowResize() {
 const container = document.getElementById('container');
 container.appendChild(renderer.domElement);
 
+const textureLoader = new THREE.TextureLoader();
+
 const uniforms = {
     time: { type: 'f', value: 0.0 },
-    texture1: { type: 't', value: THREE.ImageUtils.loadTexture('index_files/ocean_dist_resize.png') },
-    cutoff: { type: 'f', value: 0.456887065393 },
-    width: { type: 'f', value: WIDTH },
-    height: { type: 'f', value: HEIGHT },
+    texture1: { type: 't', value: textureLoader.load('index_files/ocean_dist_resize.png') },
+    noise: { type: 't', value: textureLoader.load('index_files/Noise_003.jpg') },
+    _worldToObjMatrix: { type: 'mat4', value: new THREE.Matrix4() },
 };
 
 uniforms.texture1.value.wrapS = uniforms.texture1.value.wrapT = THREE.RepeatWrapping;
 
 
-function buildScene(textVShader, textFShader) {
-
-
+function start(textVShader, textFShader) {
     const geometry = new THREE.SphereGeometry(RADIUS, 128, 64);
     const material = new THREE.ShaderMaterial({
         uniforms: uniforms,
@@ -70,8 +67,8 @@ function buildScene(textVShader, textFShader) {
 
     function tick() {
         const now = new Date();
-        const dt = (now - startTime) / 1000.0;
-        uniforms.time.value = dt;
+        const time = (now - startTime) / 1000.0;
+        uniforms.time.value = time;
     }
 
     function render() {
@@ -87,4 +84,4 @@ function buildScene(textVShader, textFShader) {
     requestAnimationFrame(step);
 }
 
-ShaderLoader('index_files/world.vert', 'index_files/world.frag', buildScene);
+ShaderLoader('index_files/world.vert', 'index_files/world.frag', start);
