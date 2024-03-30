@@ -46,10 +46,12 @@ const uniforms = {
     time: { type: 'f', value: 0.0 },
     texture1: { type: 't', value: textureLoader.load('index_files/ocean_dist_resize.png') },
     noise: { type: 't', value: textureLoader.load('index_files/Noise_003.jpg') },
-    _worldToObjMatrix: { type: 'mat4', value: new THREE.Matrix4() },
+    size: { type: 'vec2', value: new THREE.Vector2() },
 };
 
 uniforms.texture1.value.wrapS = uniforms.texture1.value.wrapT = THREE.RepeatWrapping;
+uniforms.noise.value.wrapS = uniforms.noise.value.wrapT = THREE.RepeatWrapping;
+uniforms.noise.value.repeat.set(4, 2);
 
 
 function start(textVShader, textFShader) {
@@ -57,7 +59,9 @@ function start(textVShader, textFShader) {
     const material = new THREE.ShaderMaterial({
         uniforms: uniforms,
         vertexShader: textVShader,
-        fragmentShader: textFShader
+        fragmentShader: textFShader,
+        transparent: true,
+        // side: THREE.DoubleSide,
     });
 
     const earthMesh = new THREE.Mesh(geometry, material);
@@ -69,6 +73,7 @@ function start(textVShader, textFShader) {
         const now = new Date();
         const time = (now - startTime) / 1000.0;
         uniforms.time.value = time;
+        renderer.getSize(uniforms.size.value);
     }
 
     function render() {
