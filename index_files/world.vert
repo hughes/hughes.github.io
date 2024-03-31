@@ -12,7 +12,7 @@ float rand(float seed){
 }
 
 void main() {
-    vUv = uv + vec2(time / rotation_period, 0.0);
+    vUv = uv;
     vNormal = vec3(modelViewMatrix * vec4(normal, 1.0));
 
     vec3 offset = vec3(0.0);

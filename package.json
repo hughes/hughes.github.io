@@ -1,0 +1,11 @@
+{
+    "name": "hughes.github.io",
+    "version": "0.0.0",
+    "author": "matt hughes",
+    "dependencies": {
+        "three": "latest"
+    },
+    "devDependencies": {
+        "vite": "^5.2.7"
+    }
+}

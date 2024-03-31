@@ -14,7 +14,7 @@ vec3 surface_material(float value, vec3 position) {
 
     vec3 ocean = vec3(0.05, 0.28, 0.38);
     vec3 land = vec3(0.00, 0.45, 0.35);
-    vec3 shore = vec3(0.75, 0.75, 0.63);
+    vec3 shore = vec3(0.75, 0.75, 0.53);
 
     if (value > shore_cutoff) {
         return ocean;
@@ -60,12 +60,13 @@ float render_alpha(vec2 screen_coord, vec3 normal) {
     float clamped_bands = clamp(bands, 0.0, 1.0);
     float lower_bound = 0.2;
 
-    float falloff = 1.0 - clamp(fresnel(length(normal.xy), 0.0, 3.5, 18.0), 0.0, 1.0);
+    float falloff = 1.0;// - clamp(fresnel(length(normal.xy), 0.0, 3.5, 18.0), 0.0, 1.0);
     return falloff * clamp(f + max(clamped_bands, lower_bound), 0.0, 1.0);
 }
 
 float atmosphere_material(vec3 normal) {
-    float f = fresnel(length(normal.xy), 0.2, 2.0, 8.0);
+    float f = fresnel(length(normal.xy), 0.2, 0.4, 8.0);
+    // float f = 0.0;
     return f;
 }
 
@@ -78,7 +79,7 @@ void main() {
 
     vec2 screen_coord = vec2(gl_FragCoord.x / size.x, gl_FragCoord.y / size.y);
     float alpha = render_alpha(screen_coord, vNormal);
-    gl_FragColor = vec4(color, alpha);
+    gl_FragColor = vec4(color * alpha, 1.0);
     // gl_FragColor = vec4(vec3(vDebug), 1.0);
     // gl_FragColor = vec4(grid, 1.0);
     // gl_FragColor = vec4(vec3(alpha), 1.0);
