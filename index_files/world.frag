@@ -4,11 +4,13 @@ uniform float time;
 uniform vec2 size;
 varying vec2 vUv;
 varying vec3 vNormal;
-// varying vec3 vPosition;
+varying vec3 vPosition;
+varying float vDebug;
 
-vec3 surface_material(float value) {
-    float shore_cutoff = 0.46;
-    float land_cutoff = 0.45;
+vec3 surface_material(float value, vec3 position) {
+    float shore_width = fwidth(value) * 2.0;
+    float shore_cutoff = 0.455;
+    float land_cutoff = shore_cutoff - shore_width;
 
     vec3 ocean = vec3(0.05, 0.28, 0.38);
     vec3 land = vec3(0.00, 0.45, 0.35);
@@ -26,7 +28,7 @@ vec3 surface_material(float value) {
 float noise_amount(vec2 uv) {
     vec2 scaled_uv = vec2(uv.x * 4.0, uv.y * 2.0);
     vec4 noise_sample = texture2D(noise, scaled_uv);
-    return mix(0.7, 1.0, noise_sample.x);
+    return mix(0.8, 1.0, noise_sample.x);
 }
 
 float do_grid(float num_cells, float width, float location) {
@@ -46,7 +48,6 @@ vec3 grid_material(vec2 uv) {
 }
 
 float fresnel(float I, float bias, float scale, float power) {
-    // NOT TRUE FRESNEL but hella easy
     return bias + scale * pow(I, power);
 }
 
@@ -64,20 +65,22 @@ float render_alpha(vec2 screen_coord, vec3 normal) {
 }
 
 float atmosphere_material(vec3 normal) {
-    float f = fresnel(length(normal.xy), 1.2, 2.0, 8.0);
+    float f = fresnel(length(normal.xy), 0.2, 2.0, 8.0);
     return f;
 }
 
 void main() {
     vec4 value = texture2D(texture1, vUv);
-    vec3 surface = surface_material(value.x) * noise_amount(vUv);
+    vec3 surface = surface_material(value.x, vPosition) * noise_amount(vUv);
     vec3 grid = grid_material(vUv);
     float atmosphere = atmosphere_material(vNormal);
-    vec3 color = surface * atmosphere + grid;
+    vec3 color = surface + surface * atmosphere + 0.2 * atmosphere * atmosphere + grid;
 
     vec2 screen_coord = vec2(gl_FragCoord.x / size.x, gl_FragCoord.y / size.y);
     float alpha = render_alpha(screen_coord, vNormal);
     gl_FragColor = vec4(color, alpha);
+    // gl_FragColor = vec4(vec3(vDebug), 1.0);
+    // gl_FragColor = vec4(grid, 1.0);
     // gl_FragColor = vec4(vec3(alpha), 1.0);
     // gl_FragColor = vec4(vec3(atmosphere), 1.0);
 }

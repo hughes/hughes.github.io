@@ -5,7 +5,7 @@ function ShaderLoader(vertex_url, fragment_url, onLoad, onProgress, onError) {
     loader.load(vertex_url, function (vertex_text) {
         loader.load(fragment_url, function (fragment_text) {
             onLoad(vertex_text, fragment_text);
-        });
+        }, onProgress, onError);
     }, onProgress, onError);
 }
 
@@ -55,7 +55,7 @@ uniforms.noise.value.repeat.set(4, 2);
 
 
 function start(textVShader, textFShader) {
-    const geometry = new THREE.SphereGeometry(RADIUS, 128, 64);
+    const geometry = new THREE.SphereGeometry(RADIUS, 256, 128);
     const material = new THREE.ShaderMaterial({
         uniforms: uniforms,
         vertexShader: textVShader,
