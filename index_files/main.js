@@ -1,19 +1,19 @@
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { MeshLine, MeshLineMaterial } from 'three.meshline';
+
+
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { BloomPass } from 'three/addons/postprocessing/BloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-
-
-import Stats from 'three/addons/libs/stats.module.js';
-import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+// import Stats from 'three/addons/libs/stats.module.js';
+// import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 const params = {
-    threshold: 0,
-    strength: 1,
-    radius: 0,
-    exposure: 1
+    threshold: 0.508,
+    strength: 0.861,
+    radius: 0.86,
+    exposure: 0.9253,
 };
 
 const WHERE_I_AM = { lat: 34.0, long: -118.4 }
@@ -45,8 +45,11 @@ const scene = new THREE.Scene();
 
 scene.add(camera);
 camera.position.z = 400;
+// renderer.setClearColor(0x070e0d);
+renderer.setClearColor(0x033665e, 1.0);
 renderer.setSize(WIDTH, HEIGHT);
-renderer.outputColorSpace = THREE.LinearSRGBColorSpace; // optional with post-processing
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
 
 window.addEventListener('resize', onWindowResize, false);
 
@@ -74,23 +77,51 @@ uniforms.texture1.value.wrapS = uniforms.texture1.value.wrapT = THREE.RepeatWrap
 uniforms.noise.value.wrapS = uniforms.noise.value.wrapT = THREE.RepeatWrapping;
 uniforms.noise.value.repeat.set(4, 2);
 
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+bloomPass.threshold = params.threshold;
+bloomPass.strength = params.strength;
+bloomPass.radius = params.radius;
+renderer.toneMappingExposure = Math.pow(params.exposure, 4.0);
+
+
 const composer = new EffectComposer(renderer);
 const renderPass = new RenderPass(scene, camera);
 
+const outputPass = new OutputPass();
 composer.addPass(renderPass);
+composer.addPass(bloomPass);
+composer.addPass(outputPass);
 
-function circle(radius) {
-    const geometry = new THREE.BufferGeometry();
-    const position = [];
+
+// const gui = new GUI();
+
+// const bloomFolder = gui.addFolder('bloom');
+
+// bloomFolder.add(params, 'threshold', 0.0, 1.0).onChange(function (value) {
+//     bloomPass.threshold = Number(value);
+// });
+
+// bloomFolder.add(params, 'strength', 0.0, 3.0).onChange(function (value) {
+//     bloomPass.strength = Number(value);
+// });
+
+// gui.add(params, 'radius', 0.0, 1.0).step(0.01).onChange(function (value) {
+//     bloomPass.radius = Number(value);
+// });
+
+// const toneMappingFolder = gui.addFolder('tone mapping');
+// toneMappingFolder.add(params, 'exposure', 0.1, 2).onChange(function (value) {
+//     renderer.toneMappingExposure = Math.pow(value, 4.0);
+// });
+
+function circle(radius, offset = 0) {
+    const points = [];
     const numPoints = 256;
-    for (let i = 0; i < numPoints + 1; i++) {
+    for (let i = 0; i <= numPoints + 1; i++) {
         const angle = i / numPoints * Math.PI * 2
-        position.push(Math.sin(angle) * radius, Math.cos(angle) * radius, 0);
+        points.push(Math.sin(angle) * radius, Math.cos(angle) * radius, offset);
     }
-
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
-
-    return geometry;
+    return points;
 }
 
 function start(textVShader, textFShader) {
@@ -101,27 +132,49 @@ function start(textVShader, textFShader) {
         fragmentShader: textFShader,
         transparent: true,
         side: THREE.DoubleSide,
+        // dithering: true,
     });
-    material.blending = THREE.CustomBlending;
-    material.blendEquation = THREE.AddEquation;
-    material.blendSrc = THREE.SrcAlphaFactor;
-    material.blendDst = THREE.OneMinusSrcAlphaFactor;
+    // material.blending = THREE.CustomBlending;
+    // material.blendEquation = THREE.AddEquation;
+    // material.blendSrc = THREE.SrcAlphaFactor;
+    // material.blendDst = THREE.OneMinusSrcAlphaFactor;
 
     const earthMesh = new THREE.Mesh(geometry, material);
     scene.add(earthMesh);
 
     const circlePoints = circle(RADIUS * 1.2);
-    const line = new THREE.Line(circlePoints, new THREE.LineDashedMaterial({ color: 0xbfbf87, dashSize: 10, gapSize: 5 }));
-    line.computeLineDistances();
-    scene.add(line);
+    const line = new MeshLine();
+    line.setPoints(circlePoints);
+    const lineMaterial = new MeshLineMaterial({
+        color: 0xc2c4b1,
+        dashArray: 0.025,
+        // 0.5 -> balancing ; 0.1 -> more line : 0.9 -> more void
+        dashRatio: 0.5,
+        transparent: true,
+        lineWidth: 1.5,
+    });
+    const dashLineMesh = new THREE.Mesh(line, lineMaterial)
+    scene.add(dashLineMesh);
 
-    const circlePoints2 = circle(RADIUS * 1.05);
-    const line2 = new THREE.Line(circlePoints2, new THREE.LineBasicMaterial({
-        color: 0xbfbf87,
-        linewidth: 2,
-    }));
-    line2.computeLineDistances();
-    scene.add(line2);
+    const circlePoints2 = circle(RADIUS * 1.035);
+    const line2 = new MeshLine();
+    line2.setPoints(circlePoints2);
+    const lineMaterial2 = new MeshLineMaterial({
+        color: 0x71c2b7,
+        // transparent: true,
+        // opacity: 1.0,
+        lineWidth: 2.5,
+    });
+    const lineMesh2 = new THREE.Mesh(line2, lineMaterial2);
+    lineMesh2.position.z += 0.1;
+    scene.add(lineMesh2);
+    const lineMaterial3 = new MeshLineMaterial({
+        color: 0x0a9f83,
+        // transparent: true,
+        // opacity: 1.0,
+        lineWidth: 5,
+    });
+    scene.add(new THREE.Mesh(line2, lineMaterial3));
 
     const targetGeometry = new THREE.SphereGeometry(RADIUS / 15, 64, 32);
     const targetMaterial = new THREE.MeshBasicMaterial({
@@ -150,6 +203,8 @@ function start(textVShader, textFShader) {
         renderer.getSize(uniforms.size.value);
         earthMesh.rotation.y = time * -0.3;
         earthMesh.rotation.x = 0.2;
+
+        dashLineMesh.rotation.z = time * 0.03;
     }
 
     function render() {

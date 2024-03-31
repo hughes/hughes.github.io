@@ -60,7 +60,7 @@ float render_alpha(vec2 screen_coord, vec3 normal) {
     float clamped_bands = clamp(bands, 0.0, 1.0);
     float lower_bound = 0.2;
 
-    float falloff = 1.0;// - clamp(fresnel(length(normal.xy), 0.0, 3.5, 18.0), 0.0, 1.0);
+    float falloff = 1.0; // - clamp(fresnel(length(normal.xy), 0.0, 3.5, 18.0), 0.0, 1.0);
     return falloff * clamp(f + max(clamped_bands, lower_bound), 0.0, 1.0);
 }
 
@@ -80,6 +80,7 @@ void main() {
     vec2 screen_coord = vec2(gl_FragCoord.x / size.x, gl_FragCoord.y / size.y);
     float alpha = render_alpha(screen_coord, vNormal);
     gl_FragColor = vec4(color * alpha, 1.0);
+    // gl_FragColor = vec4(color, alpha);
     // gl_FragColor = vec4(vec3(vDebug), 1.0);
     // gl_FragColor = vec4(grid, 1.0);
     // gl_FragColor = vec4(vec3(alpha), 1.0);
