@@ -68,8 +68,8 @@ const textureLoader = new THREE.TextureLoader();
 
 const uniforms = {
     time: { type: 'f', value: 0.0 },
-    texture1: { type: 't', value: textureLoader.load('index_files/ocean_dist_resize.png') },
-    noise: { type: 't', value: textureLoader.load('index_files/Noise_003.jpg') },
+    texture1: { type: 't', value: textureLoader.load('images/ocean_dist_resize.png') },
+    noise: { type: 't', value: textureLoader.load('images/Noise_003.jpg') },
     size: { type: 'vec2', value: new THREE.Vector2() },
 };
 
@@ -220,4 +220,4 @@ function start(textVShader, textFShader) {
     requestAnimationFrame(step);
 }
 
-ShaderLoader('index_files/world.vert', 'index_files/world.frag', start);
+ShaderLoader('shaders/world.vert', 'shaders/world.frag', start);
